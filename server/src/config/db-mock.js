@@ -137,11 +137,6 @@ async function triggerWorker(queueName, job) {
 }
 
 // --- Dynamic Query Matching & Mutation ---
-function getCollection(modelName) {
-  if (!dbStore[modelName]) dbStore[modelName] = [];
-  return dbStore[modelName];
-}
-
 function matchFilter(doc, filter) {
   if (!filter) return true;
   for (const key of Object.keys(filter)) {
@@ -175,10 +170,15 @@ function matchFilter(doc, filter) {
         const opVal = val[op];
         if (op === '$in') {
           if (!Array.isArray(opVal)) return false;
-          if (!opVal.includes(docVal)) return false;
+          // Support strings vs objectIds comparison in mock
+          const stringifiedDocVal = docVal ? docVal.toString() : '';
+          const stringifiedInList = opVal.map(x => x ? x.toString() : '');
+          if (!stringifiedInList.includes(stringifiedDocVal)) return false;
         } else if (op === '$nin') {
           if (!Array.isArray(opVal)) return false;
-          if (opVal.includes(docVal)) return false;
+          const stringifiedDocVal = docVal ? docVal.toString() : '';
+          const stringifiedNinList = opVal.map(x => x ? x.toString() : '');
+          if (stringifiedNinList.includes(stringifiedDocVal)) return false;
         } else if (op === '$regex') {
           const regex = new RegExp(opVal, val.$options || 'i');
           if (!regex.test(docVal || '')) return false;
@@ -195,7 +195,10 @@ function matchFilter(doc, filter) {
         }
       }
     } else {
-      if (docVal !== val) return false;
+      // Handle ObjectId vs String comparison
+      const docValStr = docVal ? docVal.toString() : '';
+      const valStr = val ? val.toString() : '';
+      if (docValStr !== valStr) return false;
     }
   }
   return true;
@@ -291,6 +294,156 @@ function sortItems(items, sortOption) {
   });
 }
 
+// --- Driver-Level Collection Mock ---
+class DriverCollection {
+  constructor(name) {
+    this.name = name;
+  }
+
+  get store() {
+    if (!dbStore[this.name]) dbStore[this.name] = [];
+    return dbStore[this.name];
+  }
+
+  async createIndex() {}
+  async createIndexes() {}
+  listIndexes() {
+    return { toArray: async () => [] };
+  }
+
+  find(query, options) {
+    let items = this.store.filter(doc => matchFilter(doc, query));
+    const cursor = {
+      toArray: async () => items,
+      sort: (s) => {
+        items = sortItems(items, s);
+        return cursor;
+      },
+      skip: (s) => {
+        if (s) items = items.slice(s);
+        return cursor;
+      },
+      limit: (l) => {
+        if (l !== undefined && l !== null) items = items.slice(0, l);
+        return cursor;
+      }
+    };
+    return cursor;
+  }
+
+  async findOne(query, options) {
+    const items = this.store.filter(doc => matchFilter(doc, query));
+    return items[0] || null;
+  }
+
+  async insertOne(doc, options) {
+    if (!doc._id) doc._id = new mongoose.Types.ObjectId();
+    doc.createdAt = doc.createdAt || new Date();
+    doc.updatedAt = new Date();
+    this.store.push(doc);
+    logger.debug(`[MockDB] insertOne into ${this.name}: ${doc._id}`);
+    return { acknowledged: true, insertedId: doc._id };
+  }
+
+  async insertMany(docs, options) {
+    const insertedIds = {};
+    let idx = 0;
+    for (const doc of docs) {
+      if (!doc._id) doc._id = new mongoose.Types.ObjectId();
+      doc.createdAt = doc.createdAt || new Date();
+      doc.updatedAt = new Date();
+      this.store.push(doc);
+      insertedIds[idx++] = doc._id;
+    }
+    return { acknowledged: true, insertedIds };
+  }
+
+  async updateOne(filter, update, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    const item = items[0];
+    if (item) {
+      applyUpdate(item, update);
+      return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+    }
+    if (options && options.upsert) {
+      const newItem = { _id: new mongoose.Types.ObjectId(), createdAt: new Date() };
+      Object.assign(newItem, filter);
+      applyUpdate(newItem, update);
+      this.store.push(newItem);
+      return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: newItem._id };
+    }
+    return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+  }
+
+  async updateMany(filter, update, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    items.forEach(item => applyUpdate(item, update));
+    return { acknowledged: true, matchedCount: items.length, modifiedCount: items.length };
+  }
+
+  async deleteOne(filter, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    const item = items[0];
+    if (item) {
+      const idx = this.store.indexOf(item);
+      this.store.splice(idx, 1);
+      return { acknowledged: true, deletedCount: 1 };
+    }
+    return { acknowledged: true, deletedCount: 0 };
+  }
+
+  async deleteMany(filter, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    let deletedCount = 0;
+    items.forEach(item => {
+      const idx = this.store.indexOf(item);
+      if (idx >= 0) {
+        this.store.splice(idx, 1);
+        deletedCount++;
+      }
+    });
+    return { acknowledged: true, deletedCount };
+  }
+
+  async findOneAndUpdate(filter, update, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    let item = items[0];
+    if (item) {
+      const oldItem = JSON.parse(JSON.stringify(item));
+      applyUpdate(item, update);
+      return { value: options && options.returnDocument === 'after' ? item : oldItem, ok: 1 };
+    }
+    if (options && options.upsert) {
+      const newItem = { _id: new mongoose.Types.ObjectId(), createdAt: new Date() };
+      Object.assign(newItem, filter);
+      applyUpdate(newItem, update);
+      this.store.push(newItem);
+      return { value: newItem, ok: 1 };
+    }
+    return { value: null, ok: 1 };
+  }
+
+  async findOneAndDelete(filter, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    const item = items[0];
+    if (item) {
+      const idx = this.store.indexOf(item);
+      this.store.splice(idx, 1);
+      return { value: item, ok: 1 };
+    }
+    return { value: null, ok: 1 };
+  }
+
+  async countDocuments(filter, options) {
+    const items = this.store.filter(doc => matchFilter(doc, filter));
+    return items.length;
+  }
+
+  async count(filter, options) {
+    return this.countDocuments(filter, options);
+  }
+}
+
 // --- Main Enabler ---
 function enable() {
   logger.info('🔌 OFFLINE MOCK MODE ACTIVATED');
@@ -310,14 +463,8 @@ function enable() {
     return originalRequire.apply(this, arguments);
   };
 
-  const mockCollection = {
-    createIndex: async () => {},
-    createIndexes: async () => {},
-    listIndexes: () => ({ toArray: async () => [] }),
-  };
-
   const mockDb = {
-    collection: () => mockCollection,
+    collection: (name) => new DriverCollection(name),
     admin: () => ({ ping: async () => true }),
   };
 
@@ -335,122 +482,6 @@ function enable() {
   process.nextTick(() => {
     mongoose.connection.emit('connected');
   });
-
-  // Mock Mongoose Query.prototype.exec
-  mongoose.Query.prototype.exec = async function() {
-    const modelName = this.model.modelName;
-    const operation = this.op;
-    const filter = this._conditions || {};
-    const update = this._update;
-    const options = this.options || {};
-    
-    logger.debug(`[MockDB] Executing ${modelName}.${operation} with filter: ${JSON.stringify(filter)}`);
-    
-    const collection = getCollection(modelName);
-    let items = collection.filter(doc => matchFilter(doc, filter));
-
-    if (operation === 'find') {
-      items = sortItems(items, options.sort || this._sortField);
-      let skipVal = options.skip || this._skipVal || 0;
-      let limitVal = options.limit || this._limitVal;
-      let sliced = items.slice(skipVal);
-      if (limitVal !== undefined && limitVal !== null) {
-        sliced = sliced.slice(0, limitVal);
-      }
-      return sliced.map(item => new this.model(item));
-    }
-
-    if (operation === 'findOne' || operation === 'findById') {
-      const item = items[0];
-      return item ? new this.model(item) : null;
-    }
-
-    if (operation === 'countDocuments' || operation === 'count') {
-      return items.length;
-    }
-
-    if (operation === 'findOneAndUpdate' || operation === 'findByIdAndUpdate') {
-      let item = items[0];
-      if (item) {
-        const oldItem = JSON.parse(JSON.stringify(item));
-        applyUpdate(item, update);
-        return options.new ? new this.model(item) : new this.model(oldItem);
-      } else if (options.upsert) {
-        const newItem = { _id: new mongoose.Types.ObjectId().toString(), createdAt: new Date() };
-        Object.assign(newItem, filter);
-        applyUpdate(newItem, update);
-        collection.push(newItem);
-        return new this.model(newItem);
-      }
-      return null;
-    }
-
-    if (operation === 'updateOne') {
-      const item = items[0];
-      if (item) {
-        applyUpdate(item, update);
-        return { acknowledged: true, modifiedCount: 1, matchedCount: 1 };
-      }
-      return { acknowledged: true, modifiedCount: 0, matchedCount: 0 };
-    }
-
-    if (operation === 'updateMany') {
-      items.forEach(item => applyUpdate(item, update));
-      return { acknowledged: true, modifiedCount: items.length, matchedCount: items.length };
-    }
-
-    if (operation === 'deleteOne' || operation === 'findOneAndDelete') {
-      const item = items[0];
-      if (item) {
-        const idx = collection.indexOf(item);
-        collection.splice(idx, 1);
-        return operation === 'findOneAndDelete' ? new this.model(item) : { acknowledged: true, deletedCount: 1 };
-      }
-      return operation === 'findOneAndDelete' ? null : { acknowledged: true, deletedCount: 0 };
-    }
-
-    if (operation === 'deleteMany') {
-      let deleted = 0;
-      items.forEach(item => {
-        const idx = collection.indexOf(item);
-        if (idx >= 0) {
-          collection.splice(idx, 1);
-          deleted++;
-        }
-      });
-      return { acknowledged: true, deletedCount: deleted };
-    }
-
-    logger.warn(`[MockDB] Unsupported query operation: ${operation}`);
-    return [];
-  };
-
-  // Mock save of Document
-  mongoose.Document.prototype.save = async function() {
-    const modelName = this.constructor.modelName;
-    const collection = getCollection(modelName);
-    const data = this.toObject();
-
-    if (!data._id) {
-      data._id = new mongoose.Types.ObjectId().toString();
-    } else {
-      data._id = data._id.toString();
-    }
-
-    const idx = collection.findIndex(item => item._id.toString() === data._id);
-    if (idx >= 0) {
-      collection[idx] = data;
-    } else {
-      collection.push(data);
-    }
-
-    this._id = data._id;
-    this.createdAt = this.createdAt || new Date();
-    this.updatedAt = new Date();
-    
-    logger.debug(`[MockDB] Saved document in ${modelName}: ${data._id}`);
-    return this;
-  };
 }
 
 module.exports = { enable };
