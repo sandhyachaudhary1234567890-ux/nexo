@@ -106,19 +106,35 @@ exports.googleAuth = asyncHandler(async (req, res) => {
 
   if (!idToken) throw new AppError('Google ID token required', 400);
 
-  let payload;
-  try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: env.GOOGLE_CLIENT_ID,
-    });
-    payload = ticket.getPayload();
-  } catch (err) {
-    logger.error('Google token verification failed:', err.message);
-    throw new AppError('Invalid Google token', 401);
-  }
+  let googleId, email, name, picture;
 
-  const { sub: googleId, email, name, picture } = payload;
+  if (firebaseAdmin) {
+    try {
+      const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
+      googleId = decodedToken.uid;
+      email = decodedToken.email;
+      name = decodedToken.name || decodedToken.email.split('@')[0];
+      picture = decodedToken.picture;
+    } catch (err) {
+      logger.error('Firebase token verification failed: ' + err.message);
+      throw new AppError('Invalid Google/Firebase token', 401);
+    }
+  } else {
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      googleId = payload.sub;
+      email = payload.email;
+      name = payload.name;
+      picture = payload.picture;
+    } catch (err) {
+      logger.error('Google token verification failed: ' + err.message);
+      throw new AppError('Invalid Google token', 401);
+    }
+  }
 
   if (!email) throw new AppError('Could not retrieve email from Google', 400);
 
