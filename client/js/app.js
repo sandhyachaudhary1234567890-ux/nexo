@@ -162,10 +162,16 @@ function nextOnboardStep() {
 
 async function finishOnboarding() {
   try {
-    await authService.saveOnboarding({ ..._onboardData, completed: true });
+    const res = await authService.saveOnboarding({ ..._onboardData, completed: true });
+    if (res && res.user) {
+      nexo.user = res.user;
+    }
     document.getElementById('onboarding-screen').classList.remove('visible');
     nexo.showApp(nexo.user);
-  } catch { showToast('Failed to save onboarding', 'error'); }
+  } catch (err) {
+    console.error('Onboarding Save Error:', err);
+    showToast('Failed to save onboarding', 'error');
+  }
 }
 
 // ─── Toast System ────────────────────────────────────────────────────────────
