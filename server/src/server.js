@@ -1,5 +1,10 @@
 'use strict';
 require('dotenv').config();
+
+if (process.env.OFFLINE_MOCK_MODE === 'true') {
+  require('./config/db-mock').enable();
+}
+
 const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./app');

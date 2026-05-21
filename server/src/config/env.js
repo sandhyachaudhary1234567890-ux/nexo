@@ -13,6 +13,7 @@ const envSchema = z.object({
   PORT: z.string().default('5000').transform(Number),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CLIENT_URL: z.string().url(),
+  OFFLINE_MOCK_MODE: z.enum(['true', 'false']).default('false').transform(val => val === 'true'),
 
   // Database
   MONGO_URI: z.string().min(1, 'MONGO_URI is required'),
