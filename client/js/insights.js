@@ -4,6 +4,8 @@ let _chatHistory = [];
 
 function initInsights() {
   _chatHistory = [];
+  const container = document.getElementById('chat-messages');
+  if (container) container.innerHTML = '';
   renderWelcomeMessage();
 }
 
@@ -35,6 +37,14 @@ async function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input?.value?.trim();
   if (!text) return;
+
+  const prefs = window.nexo?.user?.preferences || {};
+  const hasAnyKey = !!(prefs.groqKey || prefs.openaiKey || prefs.geminiKey);
+  if (!hasAnyKey) {
+    showToast('At least one API Key is compulsory to activate Nexo AI!', 'warning');
+    openSettingsModal();
+    return;
+  }
 
   input.value = '';
   input.style.height = '44px';

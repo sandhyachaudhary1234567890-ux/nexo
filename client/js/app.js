@@ -266,6 +266,9 @@ async function saveSettings() {
     
     showToast('API Keys saved successfully!', 'success');
     document.getElementById('settings-modal').classList.remove('open');
+    if (window.nexo?.currentPage === 'insights') {
+      initInsights();
+    }
   } catch (err) {
     console.error('Save Settings Error:', err);
     showToast(err.response?.data?.error || 'Failed to save settings', 'error');
