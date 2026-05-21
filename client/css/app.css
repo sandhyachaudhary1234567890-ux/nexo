@@ -615,9 +615,17 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: center;
   justify-content: center;
   background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(37,99,235,0.12), transparent), var(--bg);
-  padding: 2rem;
+  padding: 2rem 1rem;
+  overflow-y: auto;
 }
-#onboarding-screen.visible { display: flex; }
+#onboarding-screen.visible {
+  display: flex;
+}
+@media (max-height: 720px) {
+  #onboarding-screen.visible {
+    align-items: flex-start;
+  }
+}
 
 .onboard-card {
   background: var(--card);

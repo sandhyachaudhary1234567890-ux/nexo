@@ -73,6 +73,36 @@ window.signInWithGoogleFirebase = async function() {
   }
 };
 
+// Helper to get the logged-in Firebase user if a session exists
+function getFirebaseUser() {
+  return new Promise((resolve) => {
+    if (typeof firebase === 'undefined') return resolve(null);
+    
+    // Check if Firebase already has a currentUser synchronously
+    if (firebase.auth().currentUser) {
+      return resolve(firebase.auth().currentUser);
+    }
+    
+    let resolved = false;
+    const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+      if (!resolved) {
+        resolved = true;
+        unsubscribe();
+        resolve(user);
+      }
+    });
+    
+    // Safeguard timeout (1.5 seconds) in case of slow initialization
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        unsubscribe();
+        resolve(null);
+      }
+    }, 1500);
+  });
+}
+
 window.authService = {
   async login(email, password) {
     const { data } = await api.post('/auth/login', { email, password });
@@ -94,6 +124,13 @@ window.authService = {
 
   async logout() {
     try { await api.post('/auth/logout'); } catch {}
+    if (typeof firebase !== 'undefined') {
+      try {
+        await firebase.auth().signOut();
+      } catch (err) {
+        console.error('Firebase sign out error:', err);
+      }
+    }
     clearToken();
   },
 
@@ -111,7 +148,20 @@ window.authService = {
       setToken(data.data.accessToken);
       const me = await this.getMe();
       return me;
-    } catch { return null; }
+    } catch (refreshErr) {
+      // If server-side cookie refresh fails, check if we have a Firebase session (Google Auth)
+      try {
+        const fbUser = await getFirebaseUser();
+        if (fbUser) {
+          const idToken = await fbUser.getIdToken();
+          const user = await this.loginWithGoogle(idToken);
+          return user;
+        }
+      } catch (fbErr) {
+        console.error('Firebase auto-login session restoration failed:', fbErr);
+      }
+      return null;
+    }
   },
 
   async saveOnboarding(payload) {

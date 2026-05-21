@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema({
   plan: { type: String, enum: ['free', 'pro', 'enterprise'], default: 'free' },
   credits: { type: Number, default: 1000, min: 0 },
   isEmailVerified: { type: Boolean, default: false },
+  lastLoginAt: { type: Date },
   onboarding: {
     completed: { type: Boolean, default: false },
     businessType: { type: String },
