@@ -19,7 +19,21 @@ if (typeof firebase !== 'undefined') {
 }
 
 // Global Firebase Google Sign-In helper function
+let isGoogleSigningIn = false;
+
 window.signInWithGoogleFirebase = async function() {
+  if (isGoogleSigningIn) return;
+  isGoogleSigningIn = true;
+  
+  // Find Google button to add active loading states
+  const googleBtn = document.querySelector('button[onclick="signInWithGoogleFirebase()"]');
+  let originalBtnContent = '';
+  if (googleBtn) {
+    originalBtnContent = googleBtn.innerHTML;
+    googleBtn.disabled = true;
+    googleBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-color:var(--text) transparent transparent transparent;display:inline-block;margin:0 auto"></span>';
+  }
+
   try {
     if (typeof firebase === 'undefined') {
       throw new Error('Firebase SDK is not loaded. Check your internet connection.');
@@ -43,7 +57,20 @@ window.signInWithGoogleFirebase = async function() {
     nexo.navigate('dashboard');
   } catch (err) {
     console.error('Google Auth Error:', err);
-    showToast(err.message || 'Google Sign-In failed', 'danger');
+    // Suppress notifications for expected user cancellations or conflict errors, but warn gently
+    if (err.code === 'auth/cancelled-popup-request') {
+      showToast('Authentication popup request reset.', 'info');
+    } else if (err.code === 'auth/popup-closed-by-user') {
+      showToast('Sign-In window closed.', 'warning');
+    } else {
+      showToast(err.message || 'Google Sign-In failed', 'danger');
+    }
+  } finally {
+    isGoogleSigningIn = false;
+    if (googleBtn) {
+      googleBtn.disabled = false;
+      googleBtn.innerHTML = originalBtnContent;
+    }
   }
 };
 
