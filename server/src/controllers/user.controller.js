@@ -64,25 +64,18 @@ exports.updateMe = asyncHandler(async (req, res) => {
 // ─── SAVE ONBOARDING ─────────────────────────────────────────────────────────
 exports.saveOnboarding = asyncHandler(async (req, res) => {
   const {
-    companyName,
-    companySize,
-    industry,
-    role,
-    useCase,
+    businessType,
+    targetCountry,
+    services,
     goals,
-    referralSource,
   } = req.body;
 
   const onboarding = {
-    companyName: companyName?.trim(),
-    companySize,
-    industry,
-    role,
-    useCase,
-    goals: Array.isArray(goals) ? goals : [],
-    referralSource,
+    businessType: businessType?.trim(),
+    targetCountry: targetCountry?.trim(),
+    services: Array.isArray(services) ? services : [],
+    goals: typeof goals === 'string' ? goals.trim() : (Array.isArray(goals) ? goals.join(', ') : goals),
     completed: true,
-    completedAt: new Date(),
   };
 
   // Remove undefined fields
