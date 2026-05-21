@@ -4,6 +4,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { AppError, sanitizeUser, generateTokens } = require('../utils/helpers');
 const User = require('../models/User');
 const logger = require('../config/logger');
+const firebaseAdmin = require('../config/firebase');
 
 const env = process.env;
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
@@ -108,7 +109,12 @@ exports.googleAuth = asyncHandler(async (req, res) => {
 
   let googleId, email, name, picture;
 
-  if (firebaseAdmin) {
+  if (process.env.OFFLINE_MOCK_MODE === 'true') {
+    googleId = 'mock_google_id_12345';
+    email = 'mockuser@nexo.ai';
+    name = 'Mock Nexo Developer';
+    picture = '';
+  } else if (firebaseAdmin) {
     try {
       const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
       googleId = decodedToken.uid;
