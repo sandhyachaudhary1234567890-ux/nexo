@@ -379,7 +379,7 @@ exports.enrichLead = asyncHandler(async (req, res) => {
   }
 
   // Add to enrichment queue
-  const { enrichmentQueue } = require('../queues');
+  const { enrichmentQueue } = require('../jobs/queues');
   await enrichmentQueue.add(
     'enrich-lead',
     { leadId: lead._id.toString(), userId: req.user._id.toString() },

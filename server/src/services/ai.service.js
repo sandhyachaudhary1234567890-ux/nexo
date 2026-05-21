@@ -22,6 +22,34 @@ const getGemini = (customKey) => {
   return new GoogleGenerativeAI(key);
 };
 
+// Helper to resolve provider dynamically based on BYOK configuration
+const resolveActiveProvider = (requestedProvider, customKeys) => {
+  const reqProv = (requestedProvider || 'groq').toLowerCase();
+  
+  const isConfigured = (p) => {
+    if (p === 'openai') return !!(customKeys?.openaiKey?.trim() || process.env.OPENAI_API_KEY);
+    if (p === 'gemini') return !!(customKeys?.geminiKey?.trim() || process.env.GEMINI_API_KEY);
+    if (p === 'groq') return !!(customKeys?.groqKey?.trim() || process.env.GROQ_API_KEY);
+    return false;
+  };
+
+  if (isConfigured(reqProv)) {
+    return reqProv;
+  }
+
+  // Fallback to any custom key entered by the user
+  if (customKeys?.groqKey?.trim() && isConfigured('groq')) return 'groq';
+  if (customKeys?.openaiKey?.trim() && isConfigured('openai')) return 'openai';
+  if (customKeys?.geminiKey?.trim() && isConfigured('gemini')) return 'gemini';
+
+  // Fallback to system env keys if configured
+  if (process.env.GROQ_API_KEY) return 'groq';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  if (process.env.GEMINI_API_KEY) return 'gemini';
+
+  return reqProv;
+};
+
 // ─── MODEL SELECTION BY TASK TYPE ─────────────────────────────────────────────
 const getModelForTask = (taskType) => {
   const models = {
@@ -45,7 +73,7 @@ const getModelForTask = (taskType) => {
  * @param {Object} customKeys - { groqKey, openaiKey, geminiKey }
  */
 exports.streamChat = async (messages, res, taskType = 'chat', provider = 'groq', customKeys = {}) => {
-  const prov = (provider || 'groq').toLowerCase();
+  const prov = resolveActiveProvider(provider, customKeys);
 
   if (prov === 'openai') {
     const openai = getOpenAI(customKeys.openaiKey);
@@ -138,7 +166,7 @@ exports.streamChat = async (messages, res, taskType = 'chat', provider = 'groq',
  * @returns {Object} - { insights, recommendations, score, summary }
  */
 exports.analyze = async (type, data, question, provider = 'groq', customKeys = {}) => {
-  const prov = (provider || 'groq').toLowerCase();
+  const prov = resolveActiveProvider(provider, customKeys);
 
   const systemPrompt = `You are Nexo AI, an expert B2B sales intelligence analyst. 
 Analyze the provided ${type} data and return a structured JSON response with:
@@ -235,7 +263,7 @@ exports.generateEmailDraft = async ({
   provider = 'groq',
   customKeys = {},
 }) => {
-  const prov = (provider || 'groq').toLowerCase();
+  const prov = resolveActiveProvider(provider, customKeys);
 
   const systemPrompt = `You are an expert B2B sales copywriter. Generate a highly personalized, compelling email for B2B outreach.
 The email should feel genuine, not like a template. Avoid generic openers.
@@ -323,11 +351,10 @@ Requirements:
  * @returns {Object} - Enriched data
  */
 exports.enrichLeadData = async (leadData, customKeys = {}) => {
-  const genAI = getGemini(customKeys.geminiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const prov = resolveActiveProvider('gemini', customKeys);
 
-  const prompt = `You are a B2B research analyst. Enrich the following company/lead data.
-Return a JSON object with these fields (use null if unknown):
+  const systemPrompt = `You are a B2B research analyst. Enrich the provided lead/company data.
+Return a JSON object with exactly these fields (use null if unknown):
 {
   "companyDescription": string,
   "industry": string,
@@ -344,18 +371,54 @@ Return a JSON object with these fields (use null if unknown):
   "enrichmentConfidence": number (0-1)
 }
 
-Lead Data: ${JSON.stringify(leadData)}
+Always respond with valid JSON only.`;
 
-Return only valid JSON, no markdown.`;
+  const userMessage = `Lead Data: ${JSON.stringify(leadData)}`;
 
-  try {
-    const result = await model.generateContent(prompt);
+  let content;
+
+  if (prov === 'openai') {
+    const openai = getOpenAI(customKeys.openaiKey);
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 1500,
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  } else if (prov === 'gemini') {
+    const genAI = getGemini(customKeys.geminiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const fullPrompt = `${systemPrompt}\n\n${userMessage}`;
+    const result = await model.generateContent(fullPrompt);
     const text = result.response.text().trim();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return JSON.parse(text);
+    content = jsonMatch ? jsonMatch[0] : text;
+  } else {
+    // groq
+    const groq = getGroq(customKeys.groqKey);
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 1500,
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    return parsed;
   } catch (err) {
-    logger.error('Gemini enrichment error:', err.message);
-    throw new Error(`Enrichment failed: ${err.message}`);
+    logger.error('AI enrichment parsing error:', err.message);
+    throw new Error(`Enrichment parse failed: ${err.message}`);
   }
 };

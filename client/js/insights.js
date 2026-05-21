@@ -8,13 +8,27 @@ function initInsights() {
 }
 
 function renderWelcomeMessage() {
-  appendMsg('ai', `👋 **Hi, I'm Nexo AI!** I can help you:
+  const prefs = window.nexo?.user?.preferences || {};
+  const hasAnyKey = !!(prefs.groqKey || prefs.openaiKey || prefs.geminiKey);
+  
+  if (!hasAnyKey) {
+    const warningText = `
+      <div style="font-weight:600;margin-bottom:0.5rem;font-size:0.95rem;color:var(--text)">👋 Welcome to Nexo AI Insights!</div>
+      <p style="margin-bottom:0.75rem;line-height:1.4">Nexo AI is currently <strong style="color:var(--amber)">inactive</strong>. To activate it, you must configure at least one API key (OpenAI, Google Gemini, or Groq) in settings. The other keys are completely optional, and the system will auto-fallback to whichever key you configure.</p>
+      <div style="margin-top:1rem">
+        <button class="btn btn-primary" onclick="openSettingsModal()"><i class="fas fa-cog" style="margin-right:0.4rem"></i>Configure API Keys</button>
+      </div>
+    `;
+    appendMsg('ai', warningText, true);
+  } else {
+    appendMsg('ai', `👋 **Hi, I'm Nexo AI!** I can help you:
 - Analyze your leads and deals
 - Draft personalized outreach emails  
 - Research companies and markets
 - Generate campaign strategy ideas
 
 What would you like to explore today?`);
+  }
 }
 
 async function sendChat() {
@@ -91,7 +105,7 @@ function getAccessToken() {
   return document.cookie.match(/accessToken=([^;]+)/)?.[1] || '';
 }
 
-function appendMsg(role, text) {
+function appendMsg(role, text, isHtml = false) {
   const id = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2);
   const container = document.getElementById('chat-messages');
   if (!container) return id;
@@ -104,7 +118,7 @@ function appendMsg(role, text) {
     <div class="msg-avatar">
       ${isUser ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>'}
     </div>
-    <div class="msg-bubble">${renderMarkdown(text)}</div>`;
+    <div class="msg-bubble">${isHtml ? text : renderMarkdown(text)}</div>`;
 
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
