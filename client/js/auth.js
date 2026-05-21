@@ -53,8 +53,7 @@ window.signInWithGoogleFirebase = async function() {
     
     // Set user on local state and transition to dashboard
     nexo.user = user;
-    nexo.updateUI();
-    nexo.navigate('dashboard');
+    nexo.showApp(user);
   } catch (err) {
     console.error('Google Auth Error:', err);
     // Suppress notifications for expected user cancellations or conflict errors, but warn gently
