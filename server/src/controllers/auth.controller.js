@@ -102,7 +102,7 @@ exports.login = asyncHandler(async (req, res) => {
 
 // ─── GOOGLE AUTH ─────────────────────────────────────────────────────────────
 exports.googleAuth = asyncHandler(async (req, res) => {
-  const { idToken } = req.body;
+  const idToken = req.body.idToken || req.body.credential;
 
   if (!idToken) throw new AppError('Google ID token required', 400);
 
