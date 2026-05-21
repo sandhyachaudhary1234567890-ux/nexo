@@ -28,7 +28,10 @@ const userSchema = new mongoose.Schema({
     smtpPass: { type: String },
     apolloKey: { type: String },
     hunterKey: { type: String },
-    clearbitKey: { type: String }
+    clearbitKey: { type: String },
+    openaiKey: { type: String, default: '' },
+    geminiKey: { type: String, default: '' },
+    groqKey: { type: String, default: '' }
   },
   refreshTokens: { type: [String], select: false, default: [] }
 }, { timestamps: true });

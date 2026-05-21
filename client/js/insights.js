@@ -28,6 +28,7 @@ async function sendChat() {
   appendMsg('user', text);
   _chatHistory.push({ role: 'user', content: text });
 
+  const provider = document.getElementById('chat-provider')?.value || 'groq';
   const taskType = detectTaskType(text);
   const typingId = appendTyping();
 
@@ -38,7 +39,7 @@ async function sendChat() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${getAccessToken()}`
       },
-      body: JSON.stringify({ messages: _chatHistory, taskType })
+      body: JSON.stringify({ messages: _chatHistory, taskType, provider })
     });
 
     if (!res.ok) throw new Error('Chat request failed');

@@ -55,8 +55,10 @@ exports.chat = asyncHandler(async (req, res) => {
 
   const fullMessages = [systemMessage, ...messages];
 
+  const provider = req.body.provider || 'groq';
+
   try {
-    await aiService.streamChat(fullMessages, res, taskType);
+    await aiService.streamChat(fullMessages, res, taskType, provider, req.user.preferences);
   } catch (err) {
     logger.error('AI chat stream error:', err.message);
     if (!res.writableEnded) {
@@ -73,7 +75,7 @@ exports.chat = asyncHandler(async (req, res) => {
 
 // ─── ANALYZE ──────────────────────────────────────────────────────────────────
 exports.analyze = asyncHandler(async (req, res) => {
-  const { type, data, question } = req.body;
+  const { type, data, question, provider = 'groq' } = req.body;
 
   if (!type || !data) throw new AppError('Analysis type and data are required', 400);
 
@@ -86,7 +88,7 @@ exports.analyze = asyncHandler(async (req, res) => {
   await deductCredits(req.user._id, ANALYSIS_COST);
 
   try {
-    const result = await aiService.analyze(type, data, question);
+    const result = await aiService.analyze(type, data, question, provider, req.user.preferences);
 
     logger.info(`AI analysis completed for user ${req.user._id}, type: ${type}`);
 
@@ -167,6 +169,7 @@ exports.draft = asyncHandler(async (req, res) => {
     fromName,
     fromCompany,
     additionalContext,
+    provider = 'groq',
   } = req.body;
 
   if (!leadData) throw new AppError('Lead data is required for draft generation', 400);
@@ -179,6 +182,8 @@ exports.draft = asyncHandler(async (req, res) => {
     fromName: fromName || req.user.name,
     fromCompany: additionalContext?.company || '',
     additionalContext,
+    provider,
+    customKeys: req.user.preferences,
   });
 
   logger.info(`Email draft generated for user ${req.user._id}`);

@@ -215,6 +215,68 @@ function toggleSidebar() {
   overlay?.classList.toggle('open');
 }
 
+// Settings Modal Helpers
+function openSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  if (!modal) return;
+  
+  // Populate the inputs from current user preferences
+  const prefs = window.nexo?.user?.preferences || {};
+  document.getElementById('settings-gemini-key').value = prefs.geminiKey || '';
+  document.getElementById('settings-groq-key').value = prefs.groqKey || '';
+  document.getElementById('settings-openai-key').value = prefs.openaiKey || '';
+  
+  modal.classList.add('open');
+}
+
+async function saveSettings() {
+  const saveBtn = document.getElementById('settings-save-btn');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin:0 auto"></span> Saving...';
+  }
+  
+  const geminiKey = document.getElementById('settings-gemini-key').value.trim();
+  const groqKey = document.getElementById('settings-groq-key').value.trim();
+  const openaiKey = document.getElementById('settings-openai-key').value.trim();
+  
+  // Validation: At least one key must be compulsory
+  if (!geminiKey && !groqKey && !openaiKey) {
+    showToast('At least one AI API Key is compulsory to activate Nexo!', 'warning');
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save API Keys';
+    }
+    return;
+  }
+  
+  try {
+    const { data } = await api.patch('/users/me', {
+      preferences: {
+        geminiKey,
+        groqKey,
+        openaiKey
+      }
+    });
+    
+    // Update local nexo user state
+    if (data?.data?.user) {
+      window.nexo.user = data.data.user;
+    }
+    
+    showToast('API Keys saved successfully!', 'success');
+    document.getElementById('settings-modal').classList.remove('open');
+  } catch (err) {
+    console.error('Save Settings Error:', err);
+    showToast(err.response?.data?.error || 'Failed to save settings', 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save API Keys';
+    }
+  }
+}
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 window.showToast = showToast;
@@ -225,5 +287,7 @@ window.switchAuthTab = switchAuthTab;
 window.nextOnboardStep = nextOnboardStep;
 window.finishOnboarding = finishOnboarding;
 window.toggleSidebar = toggleSidebar;
+window.openSettingsModal = openSettingsModal;
+window.saveSettings = saveSettings;
 
 document.addEventListener('DOMContentLoaded', () => nexo.boot());

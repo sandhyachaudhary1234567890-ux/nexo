@@ -86,17 +86,20 @@ async function enrichFromClearbit(domain) {
 
 async function enrichWithAI(lead) {
   try {
-    const prompt = `Research this company and return JSON with: description, industry, employees (number estimate), technologies (array), revenue (string estimate).\n\nCompany: ${lead.companyName}\nWebsite: ${lead.website || 'unknown'}\nIndustry: ${lead.industry || 'unknown'}\n\nReturn only valid JSON.`;
-    const raw = await aiService.analyze(prompt, {}, 'You are a business researcher. Return only valid JSON.');
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+    const customKeys = lead.createdBy?.preferences || {};
+    const parsed = await aiService.enrichLeadData({
+      companyName: lead.companyName,
+      website: lead.website,
+      industry: lead.industry
+    }, customKeys);
+
+    if (parsed) {
       return {
-        description: parsed.description || '',
-        employees: parsed.employees || 0,
-        revenue: parsed.revenue || '',
+        description: parsed.companyDescription || parsed.description || '',
+        employees: parsed.employees || parsed.employeeRange || 0,
+        revenue: parsed.revenue || parsed.annualRevenueRange || '',
         technologies: Array.isArray(parsed.technologies) ? parsed.technologies : [],
-        socialProfiles: {}
+        socialProfiles: parsed.socialProfiles || {}
       };
     }
   } catch (err) {
@@ -106,7 +109,7 @@ async function enrichWithAI(lead) {
 }
 
 async function enrichByDomain(domain, leadId) {
-  const lead = await Lead.findById(leadId).populate('createdBy', '_id');
+  const lead = await Lead.findById(leadId).populate('createdBy');
   if (!lead) throw new Error(`Lead ${leadId} not found`);
 
   let enrichmentData = null;

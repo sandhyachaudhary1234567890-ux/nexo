@@ -3,33 +3,23 @@ const OpenAI = require('openai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const logger = require('../config/logger');
 
-// ─── Initialize AI Clients ────────────────────────────────────────────────────
-let groqClient = null;
-let openaiClient = null;
-let geminiClient = null;
-
-const getGroq = () => {
-  if (!groqClient) {
-    if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY not configured');
-    groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  }
-  return groqClient;
+// ─── Initialize AI Clients with custom keys or fallback ───────────────────────
+const getGroq = (customKey) => {
+  const key = customKey?.trim() || process.env.GROQ_API_KEY;
+  if (!key) throw new Error('Groq API Key not configured. Please configure it in Settings.');
+  return new Groq({ apiKey: key });
 };
 
-const getOpenAI = () => {
-  if (!openaiClient) {
-    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured');
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return openaiClient;
+const getOpenAI = (customKey) => {
+  const key = customKey?.trim() || process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('OpenAI API Key not configured. Please configure it in Settings.');
+  return new OpenAI({ apiKey: key });
 };
 
-const getGemini = () => {
-  if (!geminiClient) {
-    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
-    geminiClient = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  }
-  return geminiClient;
+const getGemini = (customKey) => {
+  const key = customKey?.trim() || process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('Google Gemini API Key not configured. Please configure it in Settings.');
+  return new GoogleGenerativeAI(key);
 };
 
 // ─── MODEL SELECTION BY TASK TYPE ─────────────────────────────────────────────
@@ -43,55 +33,112 @@ const getModelForTask = (taskType) => {
   return models[taskType] || models.chat;
 };
 
-// ─── STREAM CHAT (SSE via Groq) ───────────────────────────────────────────────
+// ─── STREAM CHAT (SSE via multiple providers) ─────────────────────────────────
 /**
- * Streams a chat response using Groq's streaming API.
+ * Streams a chat response using Groq, OpenAI, or Gemini.
  * Writes SSE-formatted chunks to the Express response.
  *
  * @param {Array} messages - Array of { role, content } message objects
  * @param {Object} res - Express response object (SSE mode)
  * @param {string} taskType - Task type for model selection
+ * @param {string} provider - 'groq', 'openai', or 'gemini'
+ * @param {Object} customKeys - { groqKey, openaiKey, geminiKey }
  */
-exports.streamChat = async (messages, res, taskType = 'chat') => {
-  const groq = getGroq();
-  const model = getModelForTask(taskType);
+exports.streamChat = async (messages, res, taskType = 'chat', provider = 'groq', customKeys = {}) => {
+  const prov = (provider || 'groq').toLowerCase();
 
-  const stream = await groq.chat.completions.create({
-    model,
-    messages,
-    max_tokens: 2048,
-    temperature: 0.7,
-    stream: true,
-  });
+  if (prov === 'openai') {
+    const openai = getOpenAI(customKeys.openaiKey);
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      max_tokens: 2048,
+      temperature: 0.7,
+      stream: true,
+    });
 
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta && !res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
-    }
-
-    // Check for finish reason
-    const finishReason = chunk.choices[0]?.finish_reason;
-    if (finishReason && finishReason !== 'null') {
-      if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ done: true, finishReason })}\n\n`);
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ content: delta, chunk: delta })}\n\n`);
       }
-      break;
+      const finishReason = chunk.choices[0]?.finish_reason;
+      if (finishReason && finishReason !== 'null') {
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ done: true, finishReason })}\n\n`);
+        }
+        break;
+      }
+    }
+  } else if (prov === 'gemini') {
+    const genAI = getGemini(customKeys.geminiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+    const userMessages = messages.filter(m => m.role !== 'system').map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const chatSession = model.startChat({
+      history: userMessages.slice(0, -1),
+      systemInstruction: systemMessage
+    });
+
+    const lastMsg = userMessages[userMessages.length - 1]?.parts[0]?.text || '';
+    const resultStream = await chatSession.sendMessageStream(lastMsg);
+
+    for await (const chunk of resultStream.stream) {
+      const text = chunk.text();
+      if (text && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ content: text, chunk: text })}\n\n`);
+      }
+    }
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    }
+  } else {
+    // default groq
+    const groq = getGroq(customKeys.groqKey);
+    const model = getModelForTask(taskType);
+
+    const stream = await groq.chat.completions.create({
+      model,
+      messages,
+      max_tokens: 2048,
+      temperature: 0.7,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ content: delta, chunk: delta })}\n\n`);
+      }
+      const finishReason = chunk.choices[0]?.finish_reason;
+      if (finishReason && finishReason !== 'null') {
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ done: true, finishReason })}\n\n`);
+        }
+        break;
+      }
     }
   }
 };
 
-// ─── ANALYZE (OpenAI) ─────────────────────────────────────────────────────────
+// ─── ANALYZE (Groq/OpenAI/Gemini) ─────────────────────────────────────────────
 /**
- * Analyzes lead/deal data using OpenAI.
+ * Analyzes lead/deal data.
  *
  * @param {string} type - Type of data: 'lead', 'deal', 'contact', 'campaign'
  * @param {Object} data - The data to analyze
  * @param {string} [question] - Optional specific question
+ * @param {string} provider - 'groq', 'openai', or 'gemini'
+ * @param {Object} customKeys - { groqKey, openaiKey, geminiKey }
  * @returns {Object} - { insights, recommendations, score, summary }
  */
-exports.analyze = async (type, data, question) => {
-  const groq = getGroq(); // Use Groq for cost efficiency
+exports.analyze = async (type, data, question, provider = 'groq', customKeys = {}) => {
+  const prov = (provider || 'groq').toLowerCase();
 
   const systemPrompt = `You are Nexo AI, an expert B2B sales intelligence analyst. 
 Analyze the provided ${type} data and return a structured JSON response with:
@@ -108,18 +155,44 @@ Always respond with valid JSON only.`;
     ? `Analyze this ${type} data and specifically answer: "${question}"\n\nData: ${JSON.stringify(data, null, 2)}`
     : `Analyze this ${type} data:\n\n${JSON.stringify(data, null, 2)}`;
 
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage },
-    ],
-    max_tokens: 1500,
-    temperature: 0.3,
-    response_format: { type: 'json_object' },
-  });
+  let content;
 
-  const content = response.choices[0]?.message?.content;
+  if (prov === 'openai') {
+    const openai = getOpenAI(customKeys.openaiKey);
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 1500,
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  } else if (prov === 'gemini') {
+    const genAI = getGemini(customKeys.geminiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const fullPrompt = `${systemPrompt}\n\n${userMessage}`;
+    const result = await model.generateContent(fullPrompt);
+    const text = result.response.text().trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    content = jsonMatch ? jsonMatch[0] : text;
+  } else {
+    // groq
+    const groq = getGroq(customKeys.groqKey);
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 1500,
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  }
 
   try {
     return JSON.parse(content);
@@ -135,9 +208,9 @@ Always respond with valid JSON only.`;
   }
 };
 
-// ─── GENERATE EMAIL DRAFT ─────────────────────────────────────────────────────
+// ─── GENERATE EMAIL DRAFT (Groq/OpenAI/Gemini) ───────────────────────────────
 /**
- * Generates a personalized email draft using Groq.
+ * Generates a personalized email draft.
  *
  * @param {Object} options
  * @param {Object} options.leadData - Lead information
@@ -147,6 +220,8 @@ Always respond with valid JSON only.`;
  * @param {string} options.fromName - Sender name
  * @param {string} options.fromCompany - Sender company
  * @param {Object} options.additionalContext - Extra context
+ * @param {string} options.provider - 'groq', 'openai', or 'gemini'
+ * @param {Object} options.customKeys - Custom user keys
  * @returns {{ subject: string, body: string, tone: string }}
  */
 exports.generateEmailDraft = async ({
@@ -157,8 +232,10 @@ exports.generateEmailDraft = async ({
   fromName,
   fromCompany,
   additionalContext,
+  provider = 'groq',
+  customKeys = {},
 }) => {
-  const groq = getGroq();
+  const prov = (provider || 'groq').toLowerCase();
 
   const systemPrompt = `You are an expert B2B sales copywriter. Generate a highly personalized, compelling email for B2B outreach.
 The email should feel genuine, not like a template. Avoid generic openers.
@@ -181,18 +258,44 @@ Requirements:
 - Don't use generic phrases like "I hope this email finds you well"
 - Use {{firstName}} as a placeholder for personalization`;
 
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    max_tokens: 800,
-    temperature: 0.8,
-    response_format: { type: 'json_object' },
-  });
+  let content;
 
-  const content = response.choices[0]?.message?.content;
+  if (prov === 'openai') {
+    const openai = getOpenAI(customKeys.openaiKey);
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 800,
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  } else if (prov === 'gemini') {
+    const genAI = getGemini(customKeys.geminiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+    const result = await model.generateContent(fullPrompt);
+    const text = result.response.text().trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    content = jsonMatch ? jsonMatch[0] : text;
+  } else {
+    // groq
+    const groq = getGroq(customKeys.groqKey);
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 800,
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+    });
+    content = response.choices[0]?.message?.content;
+  }
 
   try {
     const parsed = JSON.parse(content);
@@ -216,10 +319,11 @@ Requirements:
  * Returns structured enrichment data.
  *
  * @param {Object} leadData - Basic lead information
+ * @param {Object} customKeys - Custom user keys
  * @returns {Object} - Enriched data
  */
-exports.enrichLeadData = async (leadData) => {
-  const genAI = getGemini();
+exports.enrichLeadData = async (leadData, customKeys = {}) => {
+  const genAI = getGemini(customKeys.geminiKey);
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
   const prompt = `You are a B2B research analyst. Enrich the following company/lead data.

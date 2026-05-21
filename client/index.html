@@ -252,7 +252,7 @@
           <i class="fas fa-bell"></i>
           <div class="notif-dot" id="notif-badge" data-count="0" style="display:none"></div>
         </div>
-        <div class="icon-btn" title="Settings" onclick="showToast('Settings coming soon!', 'info')">
+        <div class="icon-btn" title="Settings" onclick="openSettingsModal()">
           <i class="fas fa-cog"></i>
         </div>
       </div>
@@ -487,6 +487,11 @@
           </button>
         </div>
         <div class="chat-input-area">
+          <select id="chat-provider" class="form-select" style="max-width: 140px; min-height: 44px; margin-right: 0.5rem; flex-shrink: 0; background: var(--card);">
+            <option value="groq">Groq (Llama)</option>
+            <option value="openai">OpenAI (GPT)</option>
+            <option value="gemini">Google AI</option>
+          </select>
           <textarea id="chat-input" class="form-textarea" placeholder="Ask Nexo AI anything about your leads, pipeline, or outreach…"
             style="min-height:44px;max-height:120px"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
@@ -771,6 +776,61 @@
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-full">Add Lead</button>
+    </form>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal modal-lg" style="max-width: 500px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-cog text-blue" style="margin-right: 0.5rem;"></i>AI Settings</h3>
+      <button class="btn btn-ghost btn-icon" onclick="document.getElementById('settings-modal').classList.remove('open')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    
+    <div style="background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.15); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; display: flex; gap: 0.75rem; align-items: flex-start;">
+      <i class="fas fa-info-circle" style="color: var(--blue-light); font-size: 1.1rem; margin-top: 2px;"></i>
+      <div style="font-size: 0.85rem; line-height: 1.4; color: var(--text);">
+        <strong style="color: var(--blue-light);">Bring Your Own Key (BYOK)</strong><br>
+        Please configure at least one API key below to activate Nexo's sales intelligence engine. You can then choose which model provider you want to use for AI chat, lead enrichment, and campaign actions.
+      </div>
+    </div>
+
+    <form onsubmit="event.preventDefault(); saveSettings()">
+      <div class="form-group">
+        <label class="form-label" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <span><i class="fab fa-google" style="color: var(--green); margin-right: 0.4rem; width: 14px; text-align: center;"></i>Google Gemini API Key</span>
+          <span style="font-size: 0.75rem; color: var(--text3); margin-left: auto;">Optional</span>
+        </label>
+        <input id="settings-gemini-key" type="password" class="form-input" placeholder="AIzaSy...">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <span><i class="fas fa-fire" style="color: var(--amber); margin-right: 0.4rem; width: 14px; text-align: center;"></i>Groq API Key</span>
+          <span style="font-size: 0.75rem; color: var(--text3); margin-left: auto;">Optional</span>
+        </label>
+        <input id="settings-groq-key" type="password" class="form-input" placeholder="gsk_...">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <span><i class="fas fa-cube" style="color: var(--blue-light); margin-right: 0.4rem; width: 14px; text-align: center;"></i>OpenAI API Key</span>
+          <span style="font-size: 0.75rem; color: var(--text3); margin-left: auto;">Optional</span>
+        </label>
+        <input id="settings-openai-key" type="password" class="form-input" placeholder="sk-proj-...">
+      </div>
+
+      <div style="font-size: 0.75rem; color: var(--text3); margin-bottom: 1.5rem; text-align: right;">
+        * At least one API key is <span style="color: var(--red); font-weight: 600;">compulsory</span>
+      </div>
+
+      <div class="flex gap-1" style="justify-content: flex-end;">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('settings-modal').classList.remove('open')">Cancel</button>
+        <button type="submit" id="settings-save-btn" class="btn btn-primary">Save API Keys</button>
+      </div>
     </form>
   </div>
 </div>

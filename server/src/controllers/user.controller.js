@@ -23,6 +23,15 @@ exports.updateMe = asyncHandler(async (req, res) => {
     }
   }
 
+  // Merge preferences to prevent wiping out other settings
+  if (updates.preferences !== undefined && typeof updates.preferences === 'object') {
+    const currentPrefs = req.user.preferences && req.user.preferences.toObject ? req.user.preferences.toObject() : (req.user.preferences || {});
+    updates.preferences = {
+      ...currentPrefs,
+      ...updates.preferences,
+    };
+  }
+
   // Validate name if provided
   if (updates.name !== undefined) {
     const name = updates.name.trim();
